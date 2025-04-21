@@ -14,7 +14,7 @@ DEFAULT_TIMEOUT = 5000
 CHUNK_SIZE = 800  # words per summarization chunk
 
 # Load open-source LLM summarizer
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-6-6")
 
 # Prompt template for LLM extraction
 EXTRACTION_PROMPT = """
