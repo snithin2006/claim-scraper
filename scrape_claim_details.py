@@ -76,8 +76,7 @@ def extract_info(text: str) -> dict:
     return data
 
 @app.post("/scrape")
-def scrape_claim_details(claim: ClaimURL):
-    url = claim.url
+def scrape_claim_details(url: str):
     try:
         text = get_text_from_static(url) if is_static_page(url) else get_text_from_dynamic(url)
         return extract_info(text)
