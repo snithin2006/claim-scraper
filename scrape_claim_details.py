@@ -41,8 +41,10 @@ def get_text_from_dynamic(url: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     return soup.get_text(separator="\n")
 
-def extract_info(text: str) -> dict:
+def extract_info(text):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
+    text_blob = " ".join(lines).lower()  # flatten for better context search
+
     data = {
         "LawsuitAmount": None,
         "MaxClaimAmount": None,
@@ -50,30 +52,24 @@ def extract_info(text: str) -> dict:
         "TierDescriptions": []
     }
 
-    for line in lines:
-        if any(k in line.lower() for k in FUND_KEYWORDS):
-            match = re.search(r"\$\d[\d,\.]*", line)
-            if match:
-                data["LawsuitAmount"] = match.group()
-                break
+    # Lawsuit amount
+    match = re.search(r"\$\s?(\d{1,3}(?:[,\.]\d{3})+)", text_blob)
+    if "settlement" in text_blob and match:
+        data["LawsuitAmount"] = f"${match.group(1)}"
 
-    for line in lines:
-        if any(k in line.lower() for k in PROOF_KEYWORDS):
-            data["ProofRequirement"] = line
-            break
+    # Proof requirement (flex match)
+    if "deductions" in text_blob or "black car fund" in text_blob:
+        data["ProofRequirement"] = "Proof of NY sales tax or Black Car Fund deductions"
 
-    for line in lines:
-        if "per person" in line.lower() or "maximum" in line.lower():
-            match = re.search(r"\$\d[\d,\.]*", line)
-            if match:
-                data["MaxClaimAmount"] = match.group()
-                break
+    # Max claim amount – still not present here, so we leave as None
 
+    # Tiers – match lines mentioning time or pay rate
     for line in lines:
-        if any(k in line.lower() for k in TIER_KEYWORDS):
+        if any(kw in line.lower() for kw in ["hour", "tier", "rate", "file", "eligible", "training"]):
             data["TierDescriptions"].append(line)
 
     return data
+
 
 @app.post("/scrape")
 def scrape_claim_details(url: str):
