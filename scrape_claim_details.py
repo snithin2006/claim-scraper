@@ -5,15 +5,35 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import re
 import uvicorn
+from transformers import pipeline
 
 app = FastAPI()
 
 # Configs
 DEFAULT_TIMEOUT = 5000
 
-FUND_KEYWORDS = ["settlement fund", "total fund", "settlement amount"]
-PROOF_KEYWORDS = ["proof of purchase", "no proof required", "proof of employment"]
-TIER_KEYWORDS = ["tier", "eligible for", "class member"]
+# Load open-source LLM summarizer
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+
+# Prompt template for LLM extraction
+EXTRACTION_PROMPT = """
+Given the text of a class action or legal settlement page, extract the following structured fields:
+
+1. Total settlement amount (in USD)
+2. Maximum payout per person (if mentioned)
+3. Whether proof of purchase or employment is required
+4. Any tiered payout logic or rules
+5. Deadline to file a claim
+
+Return your response in this JSON format:
+{
+  "LawsuitAmount": "...",
+  "MaxClaimAmount": "...",
+  "ProofRequirement": "...",
+  "TierDescriptions": ["...", "..."],
+  "ClaimDeadline": "..."
+}
+"""
 
 class ClaimURL(BaseModel):
     url: str
@@ -41,42 +61,50 @@ def get_text_from_dynamic(url: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     return soup.get_text(separator="\n")
 
-def extract_info(text):
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    text_blob = " ".join(lines).lower()  # flatten for better context search
-
+def extract_info_with_llm(text):
     data = {
         "LawsuitAmount": None,
         "MaxClaimAmount": None,
         "ProofRequirement": None,
-        "TierDescriptions": []
+        "TierDescriptions": [],
+        "ClaimDeadline": None
     }
 
-    # Lawsuit amount
-    match = re.search(r"\$\s?(\d{1,3}(?:[,\.]\d{3})+)", text_blob)
-    if "settlement" in text_blob and match:
+    try:
+        # Summarize input text using Hugging Face LLM
+        summary = summarizer(EXTRACTION_PROMPT + "
+Text:
+" + text, max_length=1024, min_length=100, do_sample=False)[0]['summary_text']
+    except Exception as e:
+        summary = text[:1000]  # fallback
+
+    # Extract from the summary using regex and pattern hints
+    match = re.search(r"\$\s?([\d,.]+).*settlement", summary.lower())
+    if match:
         data["LawsuitAmount"] = f"${match.group(1)}"
 
-    # Proof requirement (flex match)
-    if "deductions" in text_blob or "black car fund" in text_blob:
-        data["ProofRequirement"] = "Proof of NY sales tax or Black Car Fund deductions"
+    match = re.search(r"max(imum)?[^\d$]*\$\s?([\d,.]+)", summary.lower())
+    if match:
+        data["MaxClaimAmount"] = f"${match.group(2)}"
 
-    # Max claim amount – still not present here, so we leave as None
+    proof_match = re.search(r"proof[^\.]+\.", summary, re.IGNORECASE)
+    if proof_match:
+        data["ProofRequirement"] = proof_match.group().strip()
 
-    # Tiers – match lines mentioning time or pay rate
-    for line in lines:
-        if any(kw in line.lower() for kw in ["hour", "tier", "rate", "file", "eligible", "training"]):
-            data["TierDescriptions"].append(line)
+    deadline_match = re.search(r"deadline[^\.]+\d{4}[^\.]*\.", summary, re.IGNORECASE)
+    if deadline_match:
+        data["ClaimDeadline"] = deadline_match.group().strip()
+
+    for line in summary.split(". "):
+        if any(kw in line.lower() for kw in ["hour", "rate", "file", "eligible", "training", "tier", "sick", "support"]):
+            data["TierDescriptions"].append(line.strip())
 
     return data
-
 
 @app.post("/scrape")
 def scrape_claim_details(url: str):
     try:
         text = get_text_from_static(url) if is_static_page(url) else get_text_from_dynamic(url)
-        return extract_info(text)
+        return extract_info_with_llm(text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scraping failed: {str(e)}")
-
-# To run locally: uvicorn claim_scraper_api:app --reload
