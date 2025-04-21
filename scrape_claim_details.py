@@ -11,6 +11,7 @@ app = FastAPI()
 
 # Configs
 DEFAULT_TIMEOUT = 5000
+CHUNK_SIZE = 800  # words per summarization chunk
 
 # Load open-source LLM summarizer
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
@@ -61,6 +62,10 @@ def get_text_from_dynamic(url: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     return soup.get_text(separator="\n")
 
+def chunk_text(text, chunk_size=CHUNK_SIZE):
+    words = text.split()
+    return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+
 def extract_info_with_llm(text):
     data = {
         "LawsuitAmount": None,
@@ -71,14 +76,13 @@ def extract_info_with_llm(text):
     }
 
     try:
-        # Summarize input text using Hugging Face LLM
-        summary = summarizer(EXTRACTION_PROMPT + "
-Text:
-" + text, max_length=1024, min_length=100, do_sample=False)[0]['summary_text']
+        chunks = chunk_text(text)
+        summarized_chunks = [summarizer(EXTRACTION_PROMPT + "\nText:\n" + chunk, max_length=400, min_length=100, do_sample=False)[0]['summary_text'] for chunk in chunks]
+        summary = " ".join(summarized_chunks)
     except Exception as e:
         summary = text[:1000]  # fallback
 
-    # Extract from the summary using regex and pattern hints
+    # Extract from the combined summary using regex and pattern hints
     match = re.search(r"\$\s?([\d,.]+).*settlement", summary.lower())
     if match:
         data["LawsuitAmount"] = f"${match.group(1)}"
@@ -108,3 +112,5 @@ def scrape_claim_details(url: str):
         return extract_info_with_llm(text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scraping failed: {str(e)}")
+
+# To run locally: uvicorn claim_scraper_api:app --reload
