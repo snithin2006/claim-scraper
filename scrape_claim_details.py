@@ -36,8 +36,10 @@ Return your response in this JSON format:
 }
 """
 
+
 class ClaimURL(BaseModel):
     url: str
+
 
 def is_static_page(url: str) -> bool:
     try:
@@ -46,10 +48,12 @@ def is_static_page(url: str) -> bool:
     except Exception:
         return False
 
+
 def get_text_from_static(url: str) -> str:
     response = requests.get(url)
     soup = BeautifulSoup(response.text, "html.parser")
     return soup.get_text(separator="\n")
+
 
 def get_text_from_dynamic(url: str) -> str:
     with sync_playwright() as p:
@@ -62,9 +66,11 @@ def get_text_from_dynamic(url: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     return soup.get_text(separator="\n")
 
+
 def chunk_text(text, chunk_size=CHUNK_SIZE):
     words = text.split()
     return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+
 
 def extract_info_with_llm(text):
     data = {
@@ -77,7 +83,15 @@ def extract_info_with_llm(text):
 
     try:
         chunks = chunk_text(text)
-        summarized_chunks = [summarizer(EXTRACTION_PROMPT + "\nText:\n" + chunk, max_length=400, min_length=100, do_sample=False)[0]['summary_text'] for chunk in chunks]
+        summarized_chunks = []
+        for chunk in chunks:
+            input_text = EXTRACTION_PROMPT + "\nText:\n" + chunk
+            # aim for 60% length output
+            max_len = max(80, int(len(input_text.split()) * 0.6))
+            summary_result = summarizer(
+                input_text, max_length=max_len, min_length=60, do_sample=False)
+            summary_text = summary_result[0]['summary_text']
+            summarized_chunks.append(summary_text)
         summary = " ".join(summarized_chunks)
     except Exception as e:
         summary = text[:1000]  # fallback
@@ -95,7 +109,8 @@ def extract_info_with_llm(text):
     if proof_match:
         data["ProofRequirement"] = proof_match.group().strip()
 
-    deadline_match = re.search(r"deadline[^\.]+\d{4}[^\.]*\.", summary, re.IGNORECASE)
+    deadline_match = re.search(
+        r"deadline[^\.]+\d{4}[^\.]*\.", summary, re.IGNORECASE)
     if deadline_match:
         data["ClaimDeadline"] = deadline_match.group().strip()
 
@@ -105,12 +120,15 @@ def extract_info_with_llm(text):
 
     return data
 
+
 @app.post("/scrape")
 def scrape_claim_details(url: str):
     try:
-        text = get_text_from_static(url) if is_static_page(url) else get_text_from_dynamic(url)
+        text = get_text_from_static(url) if is_static_page(
+            url) else get_text_from_dynamic(url)
         return extract_info_with_llm(text)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scraping failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Scraping failed: {str(e)}")
 
 # To run locally: uvicorn claim_scraper_api:app --reload
