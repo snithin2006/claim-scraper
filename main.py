@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from scrape_claim_details import scrape_claim_details
 
-# Optional: install Chromium at startup
+# ✅ Install Chromium on startup (works for Railway)
 def ensure_chromium_installed():
     try:
         subprocess.run(["playwright", "install", "chromium"], check=True)
@@ -12,12 +12,14 @@ def ensure_chromium_installed():
 
 ensure_chromium_installed()
 
-# FastAPI setup
+# ✅ FastAPI app init
 app = FastAPI()
 
+# ✅ Define input schema
 class ClaimRequest(BaseModel):
     url: str
 
+# ✅ Accept JSON with field { "url": "..." }
 @app.post("/scrape")
 def scrape(claim: ClaimRequest):
     try:
