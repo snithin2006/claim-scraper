@@ -1,11 +1,9 @@
-import asyncio
+import subprocess
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from scrape_claim_details import scrape_claim_details
-from playwright.__main__ import main as playwright_main
-import subprocess
 
-# Optional: Install Chromium browser on cold start
+# Optional: install Chromium at startup
 def ensure_chromium_installed():
     try:
         subprocess.run(["playwright", "install", "chromium"], check=True)
@@ -14,7 +12,7 @@ def ensure_chromium_installed():
 
 ensure_chromium_installed()
 
-# FastAPI app
+# FastAPI setup
 app = FastAPI()
 
 class ClaimRequest(BaseModel):
